@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>💡 Ideas → ✅ Todos</title>
+  <meta name="description" content="A Notion-style flow board: capture ideas, promote them to todos, and ship." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E💡%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ========= HEADER ========= -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">💡</span>
+      <h1>Flow Board</h1>
+      <span class="subtitle">ideas → todos → done</span>
+    </div>
+    <div class="topbar-actions">
+      <div class="search-wrap">
+        <input id="search" type="search" placeholder="🔍 搜索..." />
+      </div>
+      <button id="stats-btn" class="icon-btn" title="统计">📊</button>
+      <button id="theme-btn" class="icon-btn" title="切换深浅色">🌙</button>
+      <button id="sync-btn" class="icon-btn" title="同步到 GitHub">☁️</button>
+      <button id="settings-btn" class="icon-btn" title="设置">⚙️</button>
+    </div>
+  </header>
+
+  <!-- ========= QUICK ADD ========= -->
+  <section class="quick-add">
+    <input id="quick-input" type="text" placeholder="✨ 写下一个想法或任务... (Enter 添加 idea，Shift+Enter 直接添加为 todo)" />
+    <div class="quick-meta">
+      <select id="quick-tag">
+        <option value="">🏷️ 标签</option>
+        <option value="工作">💼 工作</option>
+        <option value="学习">📚 学习</option>
+        <option value="生活">🌿 生活</option>
+        <option value="项目">🚀 项目</option>
+      </select>
+      <select id="quick-priority">
+        <option value="">⭐ 优先级</option>
+        <option value="high">🔴 高</option>
+        <option value="mid">🟡 中</option>
+        <option value="low">🟢 低</option>
+      </select>
+      <input id="quick-due" type="date" title="截止日期" />
+    </div>
+  </section>
+
+  <!-- ========= FILTERS ========= -->
+  <section class="filters">
+    <div class="filter-group" data-key="tag">
+      <button class="chip active" data-value="">全部标签</button>
+      <button class="chip" data-value="工作">💼 工作</button>
+      <button class="chip" data-value="学习">📚 学习</button>
+      <button class="chip" data-value="生活">🌿 生活</button>
+      <button class="chip" data-value="项目">🚀 项目</button>
+    </div>
+    <div class="filter-group" data-key="priority">
+      <button class="chip active" data-value="">全部优先级</button>
+      <button class="chip" data-value="high">🔴 高</button>
+      <button class="chip" data-value="mid">🟡 中</button>
+      <button class="chip" data-value="low">🟢 低</button>
+    </div>
+  </section>
+
+  <!-- ========= BOARD ========= -->
+  <main class="board">
+    <section class="column" data-status="idea">
+      <div class="col-header">
+        <h2>💡 Ideas</h2>
+        <span class="count" data-count="idea">0</span>
+      </div>
+      <div class="col-body" data-drop="idea"></div>
+    </section>
+
+    <section class="column" data-status="todo">
+      <div class="col-header">
+        <h2>✅ Todos</h2>
+        <span class="count" data-count="todo">0</span>
+      </div>
+      <div class="col-body" data-drop="todo"></div>
+    </section>
+
+    <section class="column" data-status="done">
+      <div class="col-header">
+        <h2>🎉 Done</h2>
+        <span class="count" data-count="done">0</span>
+      </div>
+      <div class="col-body" data-drop="done"></div>
+    </section>
+  </main>
+
+  <!-- ========= STATS MODAL ========= -->
+  <div id="stats-modal" class="modal hidden">
+    <div class="modal-card">
+      <button class="modal-close" data-close="stats-modal">✕</button>
+      <h2>📊 统计</h2>
+      <div class="stats-grid">
+        <div class="stat"><div class="stat-num" id="s-ideas">0</div><div class="stat-label">💡 灵感总数</div></div>
+        <div class="stat"><div class="stat-num" id="s-todos">0</div><div class="stat-label">✅ 待办</div></div>
+        <div class="stat"><div class="stat-num" id="s-done">0</div><div class="stat-label">🎉 已完成</div></div>
+        <div class="stat"><div class="stat-num" id="s-rate">0%</div><div class="stat-label">📈 完成率</div></div>
+        <div class="stat"><div class="stat-num" id="s-week-new">0</div><div class="stat-label">🆕 本周新增</div></div>
+        <div class="stat"><div class="stat-num" id="s-week-done">0</div><div class="stat-label">⚡ 本周完成</div></div>
+      </div>
+      <h3>📅 最近 14 天活动</h3>
+      <div id="activity-chart" class="activity"></div>
+    </div>
+  </div>
+
+  <!-- ========= SETTINGS MODAL ========= -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card">
+      <button class="modal-close" data-close="settings-modal">✕</button>
+      <h2>⚙️ 设置 · GitHub 同步</h2>
+      <p class="hint">数据默认保存在浏览器，可选启用 GitHub Issues 云端同步（多设备访问）。</p>
+      <label class="field">
+        <span>GitHub Personal Access Token</span>
+        <input id="cfg-token" type="password" placeholder="ghp_..." />
+        <small>权限需要：<code>repo</code>。仅保存在本机 localStorage，不上传任何地方。</small>
+      </label>
+      <label class="field">
+        <span>仓库（owner/repo）</span>
+        <input id="cfg-repo" type="text" placeholder="Maekfei/todo-ideas" />
+        <small>建议使用<b>私有仓库</b>保护隐私。Issues 将作为数据存储。</small>
+      </label>
+      <div class="form-actions">
+        <button id="cfg-save" class="primary">保存</button>
+        <button id="cfg-pull" class="ghost">立即从云端拉取</button>
+        <button id="cfg-push" class="ghost">立即推送到云端</button>
+      </div>
+      <p class="hint" id="cfg-status"></p>
+    </div>
+  </div>
+
+  <!-- ========= EDIT MODAL ========= -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-card">
+      <button class="modal-close" data-close="edit-modal">✕</button>
+      <h2>✏️ 编辑</h2>
+      <label class="field">
+        <span>标题</span>
+        <input id="edit-title" type="text" />
+      </label>
+      <label class="field">
+        <span>备注</span>
+        <textarea id="edit-note" rows="4" placeholder="可选：补充细节、链接、思路..."></textarea>
+      </label>
+      <div class="row">
+        <label class="field">
+          <span>标签</span>
+          <select id="edit-tag">
+            <option value="">无</option>
+            <option value="工作">💼 工作</option>
+            <option value="学习">📚 学习</option>
+            <option value="生活">🌿 生活</option>
+            <option value="项目">🚀 项目</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>优先级</span>
+          <select id="edit-priority">
+            <option value="">无</option>
+            <option value="high">🔴 高</option>
+            <option value="mid">🟡 中</option>
+            <option value="low">🟢 低</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>截止日期</span>
+          <input id="edit-due" type="date" />
+        </label>
+      </div>
+      <div class="form-actions">
+        <button id="edit-save" class="primary">保存</button>
+        <button id="edit-delete" class="danger">🗑️ 删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <footer class="footer">
+    <span>Made with 💛 · <a href="https://github.com/Maekfei/todo-ideas" target="_blank">GitHub</a></span>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
