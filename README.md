@@ -1,40 +1,68 @@
-# 💡 Flow Board · Ideas → Todos → Done
+# 💡 Flow Board
 
-A Notion-style flow board for capturing ideas, promoting them to todos, and shipping.
-
-🌐 **Live**: https://maekfei.github.io/todo-ideas/
+A Notion-style flow board for capturing ideas and shipping todos.
+Live: https://maekfei.github.io/todo-ideas/
 
 ## ✨ Features
 
-- 💡 **Three-column flow board**: `Ideas` → `Todos` → `Done`
-- 🖱️ **Drag & drop** between columns to flow your work
-- ⚡ **Quick capture**: type anywhere, Enter = idea, Shift+Enter = todo
-- 🏷️ **Tags** (Work / Study / Life / Project) and ⭐ **Priority** (high / mid / low)
-- 📅 **Due dates** with overdue / today highlighting
-- 🔍 **Instant search** across titles, notes, tags
-- 📊 **Stats**: completion rate, weekly activity heat-map (14 days)
-- 🌙 **Light/Dark theme** (auto-detects system preference)
-- 📱 **Mobile responsive** — single-column layout on phones
-- 💾 **localStorage** by default — works offline, zero setup
-- ☁️ **Optional GitHub sync** — multi-device via GitHub Issues as DB
+### Visual
+- Notion-inspired clean light & dark theme (auto-detects system)
+- Subtle column tints (yellow/blue/green) + gradient brand line
+- Priority color bars on cards (high/mid/low)
+- Animated drag placeholder line (clear drop indicator)
+- Empty-state illustrations per column
+- Custom scrollbars, refined typography (Inter + system fallbacks)
+- Fully responsive (mobile, tablet, desktop)
 
-## 🚀 Use it
+### Functional
+- 💡 Ideas → ✅ Todos → 🎉 Done flow with drag & drop
+- ✏️ Inline edit (double-click any card) with **markdown** notes
+- 🔁 Repeating tasks (daily / weekly / monthly auto-spawn on completion)
+- 🏷️ Custom tags with emoji
+- ⭐ Priority + due date with overdue/today badges
+- 🎯 "Today Focus" hero showing overdue + today + high-priority items
+- 👋 Time-of-day greeting + daily completion counter
+- 🔍 Real-time search + filter by tag / priority
+- ↶ Undo (Cmd/Ctrl+Z, plus 5s undo toast on delete)
+- ⌨️ Keyboard shortcuts (press `?` to view all)
+- 📊 Stats: completion rate + 14-day activity heatmap
+- 🌙 Dark / light theme toggle (T key)
+- ☁️ Optional GitHub Issues sync (multi-device, auto-merge by timestamp)
+- 📥 / 📤 Import & export JSON
+- 🧹 Auto-clean old Done items (>7 days)
+- 📱 PWA installable + offline-capable (service worker)
 
-1. Open https://maekfei.github.io/todo-ideas/
-2. Start typing in the quick-add bar
-3. (Optional) Click ⚙️ → paste GitHub Token → enable cloud sync
+## 🎹 Keyboard Shortcuts
 
-## 🔐 Privacy
+| Key | Action |
+|---|---|
+| `N` | Focus quick add |
+| `/` | Focus search |
+| `Enter` | Add as 💡 idea |
+| `Shift+Enter` | Add as ✅ todo |
+| `?` | Show shortcuts |
+| `Esc` | Close modal |
+| `Cmd/Ctrl+Z` | Undo |
+| `Cmd/Ctrl+Enter` | Save edit modal |
+| `T` | Toggle theme |
+| `S` | Sync to GitHub |
 
-- Default: data stays in your browser (`localStorage`)
-- Cloud sync is opt-in. Token is saved only in your browser. Use a **private repo** for sensitive data.
+## ☁️ GitHub Sync (optional)
 
-## 🛠️ Tech
+1. Create a Personal Access Token with `repo` scope at https://github.com/settings/tokens
+2. Open ⚙️ Settings → paste token + repo (e.g. `Maekfei/todo-ideas`)
+3. Tick "auto sync" — it will pull on load and push 30s after each change
+4. Use the same token on another device for multi-device sync
+5. **Recommended**: use a private repo for personal data
 
-- Pure HTML / CSS / vanilla JS — no frameworks, no build step
-- ~600 lines of code total
-- Served via GitHub Pages
+## 🛠️ Stack
 
-## 📜 License
+- Pure HTML / CSS / JS — no build step, no framework
+- LocalStorage for persistence (data survives reloads)
+- GitHub Issues API for optional sync
+- Service Worker for offline / PWA install
+- Hosted on GitHub Pages
+
+## 📄 License
 
 MIT

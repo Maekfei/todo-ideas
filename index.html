@@ -3,41 +3,55 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <title>💡 Ideas → ✅ Todos</title>
-  <meta name="description" content="A Notion-style flow board: capture ideas, promote them to todos, and ship." />
+  <title>💡 Flow Board · Ideas → Todos → Done</title>
+  <meta name="description" content="Capture ideas, ship todos. A Notion-style flow board with drag-and-drop, GitHub sync, keyboard shortcuts, and PWA support." />
+  <meta name="theme-color" content="#fbfbfa" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E💡%3C/text%3E%3C/svg%3E" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E💡%3C/text%3E%3C/svg%3E" />
+  <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
+  <!-- Subtle gradient line at top -->
+  <div class="brand-line"></div>
+
   <!-- ========= HEADER ========= -->
   <header class="topbar">
     <div class="brand">
       <span class="logo">💡</span>
-      <h1>Flow Board</h1>
-      <span class="subtitle">ideas → todos → done</span>
+      <div class="brand-text">
+        <h1>Flow Board</h1>
+        <span class="subtitle">Capture · Organize · Ship</span>
+      </div>
     </div>
     <div class="topbar-actions">
       <div class="search-wrap">
-        <input id="search" type="search" placeholder="🔍 搜索..." />
+        <input id="search" type="search" placeholder="🔍 搜索   /  快捷键" />
       </div>
+      <button id="help-btn"  class="icon-btn" title="快捷键 (?)">⌨️</button>
       <button id="stats-btn" class="icon-btn" title="统计">📊</button>
       <button id="theme-btn" class="icon-btn" title="切换深浅色">🌙</button>
-      <button id="sync-btn" class="icon-btn" title="同步到 GitHub">☁️</button>
+      <button id="sync-btn"  class="icon-btn" title="同步到 GitHub"><span id="sync-icon">☁️</span></button>
       <button id="settings-btn" class="icon-btn" title="设置">⚙️</button>
     </div>
   </header>
 
+  <!-- ========= GREETING + TODAY FOCUS ========= -->
+  <section class="hero">
+    <div class="greeting">
+      <h2 id="greeting-text">👋 Hi</h2>
+      <p id="greeting-sub" class="muted"></p>
+    </div>
+    <div class="today-focus" id="today-focus">
+      <!-- populated by JS -->
+    </div>
+  </section>
+
   <!-- ========= QUICK ADD ========= -->
   <section class="quick-add">
-    <input id="quick-input" type="text" placeholder="✨ 写下一个想法或任务... (Enter 添加 idea，Shift+Enter 直接添加为 todo)" />
+    <input id="quick-input" type="text" placeholder="✨ 写下一个想法或任务...   (Enter = idea · Shift+Enter = todo)" />
     <div class="quick-meta">
-      <select id="quick-tag">
-        <option value="">🏷️ 标签</option>
-        <option value="工作">💼 工作</option>
-        <option value="学习">📚 学习</option>
-        <option value="生活">🌿 生活</option>
-        <option value="项目">🚀 项目</option>
-      </select>
+      <select id="quick-tag"><option value="">🏷️ 标签</option></select>
       <select id="quick-priority">
         <option value="">⭐ 优先级</option>
         <option value="high">🔴 高</option>
@@ -45,17 +59,20 @@
         <option value="low">🟢 低</option>
       </select>
       <input id="quick-due" type="date" title="截止日期" />
+      <select id="quick-repeat" title="重复">
+        <option value="">🔁 不重复</option>
+        <option value="daily">每天</option>
+        <option value="weekly">每周</option>
+        <option value="monthly">每月</option>
+      </select>
     </div>
   </section>
 
   <!-- ========= FILTERS ========= -->
   <section class="filters">
-    <div class="filter-group" data-key="tag">
+    <div class="filter-group" data-key="tag" id="filter-tags">
       <button class="chip active" data-value="">全部标签</button>
-      <button class="chip" data-value="工作">💼 工作</button>
-      <button class="chip" data-value="学习">📚 学习</button>
-      <button class="chip" data-value="生活">🌿 生活</button>
-      <button class="chip" data-value="项目">🚀 项目</button>
+      <!-- dynamic tags injected here -->
     </div>
     <div class="filter-group" data-key="priority">
       <button class="chip active" data-value="">全部优先级</button>
@@ -83,10 +100,12 @@
       <div class="col-body" data-drop="todo"></div>
     </section>
 
-    <section class="column" data-status="done">
+    <section class="column" data-status="done" id="col-done">
       <div class="col-header">
         <h2>🎉 Done</h2>
         <span class="count" data-count="done">0</span>
+        <button id="done-toggle" class="mini-btn" title="折叠 / 展开">▼</button>
+        <button id="done-clear"  class="mini-btn" title="清理 7 天前的 Done">🧹</button>
       </div>
       <div class="col-body" data-drop="done"></div>
     </section>
@@ -114,24 +133,46 @@
   <div id="settings-modal" class="modal hidden">
     <div class="modal-card">
       <button class="modal-close" data-close="settings-modal">✕</button>
-      <h2>⚙️ 设置 · GitHub 同步</h2>
-      <p class="hint">数据默认保存在浏览器，可选启用 GitHub Issues 云端同步（多设备访问）。</p>
+      <h2>⚙️ 设置</h2>
+
+      <h3>☁️ GitHub 同步</h3>
+      <p class="hint">数据默认保存在浏览器，可选启用 GitHub Issues 云端同步（多设备访问）。修改后会<b>每 30 秒自动推送</b>。</p>
       <label class="field">
         <span>GitHub Personal Access Token</span>
         <input id="cfg-token" type="password" placeholder="ghp_..." />
-        <small>权限需要：<code>repo</code>。仅保存在本机 localStorage，不上传任何地方。</small>
+        <small>权限需要 <code>repo</code>。仅保存在本机 localStorage。</small>
       </label>
       <label class="field">
         <span>仓库（owner/repo）</span>
         <input id="cfg-repo" type="text" placeholder="Maekfei/todo-ideas" />
-        <small>建议使用<b>私有仓库</b>保护隐私。Issues 将作为数据存储。</small>
+        <small>建议使用<b>私有仓库</b>。Issues 将作为数据存储。</small>
+      </label>
+      <label class="field row-inline">
+        <input id="cfg-autosync" type="checkbox" />
+        <span style="font-weight:400">启动时自动从云端拉取，修改后自动推送</span>
       </label>
       <div class="form-actions">
         <button id="cfg-save" class="primary">保存</button>
-        <button id="cfg-pull" class="ghost">立即从云端拉取</button>
-        <button id="cfg-push" class="ghost">立即推送到云端</button>
+        <button id="cfg-pull" class="ghost">⬇️ 立即拉取</button>
+        <button id="cfg-push" class="ghost">⬆️ 立即推送</button>
       </div>
       <p class="hint" id="cfg-status"></p>
+
+      <h3>🏷️ 标签管理</h3>
+      <div id="tag-manager"></div>
+      <div class="form-actions">
+        <input id="new-tag" type="text" placeholder="新标签名" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);" />
+        <input id="new-tag-emoji" type="text" placeholder="🌟" maxlength="2" style="width:50px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;text-align:center;background:var(--bg);color:var(--text);" />
+        <button id="add-tag" class="primary">添加</button>
+      </div>
+
+      <h3>💾 数据管理</h3>
+      <div class="form-actions">
+        <button id="export-json" class="ghost">📤 导出 JSON</button>
+        <button id="import-json" class="ghost">📥 导入 JSON</button>
+        <input id="import-file" type="file" accept="application/json" hidden />
+        <button id="clear-all" class="danger">🗑️ 清空所有</button>
+      </div>
     </div>
   </div>
 
@@ -145,19 +186,13 @@
         <input id="edit-title" type="text" />
       </label>
       <label class="field">
-        <span>备注</span>
-        <textarea id="edit-note" rows="4" placeholder="可选：补充细节、链接、思路..."></textarea>
+        <span>备注 <small style="font-weight:400">支持 markdown：**粗体** [链接](url) - 列表 `代码`</small></span>
+        <textarea id="edit-note" rows="5" placeholder="可选：补充细节、链接、思路..."></textarea>
       </label>
       <div class="row">
         <label class="field">
           <span>标签</span>
-          <select id="edit-tag">
-            <option value="">无</option>
-            <option value="工作">💼 工作</option>
-            <option value="学习">📚 学习</option>
-            <option value="生活">🌿 生活</option>
-            <option value="项目">🚀 项目</option>
-          </select>
+          <select id="edit-tag"><option value="">无</option></select>
         </label>
         <label class="field">
           <span>优先级</span>
@@ -172,18 +207,54 @@
           <span>截止日期</span>
           <input id="edit-due" type="date" />
         </label>
+        <label class="field">
+          <span>重复</span>
+          <select id="edit-repeat">
+            <option value="">不重复</option>
+            <option value="daily">每天</option>
+            <option value="weekly">每周</option>
+            <option value="monthly">每月</option>
+          </select>
+        </label>
       </div>
       <div class="form-actions">
-        <button id="edit-save" class="primary">保存</button>
+        <button id="edit-save" class="primary">保存 (⌘+Enter)</button>
         <button id="edit-delete" class="danger">🗑️ 删除</button>
       </div>
     </div>
   </div>
 
+  <!-- ========= HELP / SHORTCUTS MODAL ========= -->
+  <div id="help-modal" class="modal hidden">
+    <div class="modal-card">
+      <button class="modal-close" data-close="help-modal">✕</button>
+      <h2>⌨️ 快捷键</h2>
+      <table class="shortcuts">
+        <tr><td><kbd>N</kbd></td><td>聚焦快速添加框</td></tr>
+        <tr><td><kbd>/</kbd></td><td>聚焦搜索</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>添加为 💡 idea</td></tr>
+        <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>添加为 ✅ todo</td></tr>
+        <tr><td><kbd>?</kbd></td><td>显示此帮助</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>关闭弹窗 / 取消</td></tr>
+        <tr><td><kbd>⌘/Ctrl</kbd> + <kbd>Z</kbd></td><td>撤销最近操作</td></tr>
+        <tr><td><kbd>⌘/Ctrl</kbd> + <kbd>Enter</kbd></td><td>编辑弹窗中保存</td></tr>
+        <tr><td><kbd>T</kbd></td><td>切换深浅色主题</td></tr>
+        <tr><td><kbd>S</kbd></td><td>立即同步到 GitHub</td></tr>
+        <tr><td colspan="2" class="hint" style="padding-top:14px">💡 双击卡片可编辑 · 拖拽卡片在三列间流转</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========= UNDO TOAST (special, has button) ========= -->
+  <div id="undo-toast" class="toast undo hidden">
+    <span id="undo-text">已删除</span>
+    <button id="undo-btn">↶ 撤销</button>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
   <footer class="footer">
-    <span>Made with 💛 · <a href="https://github.com/Maekfei/todo-ideas" target="_blank">GitHub</a></span>
+    <span>Made with 💛 · <a href="https://github.com/Maekfei/todo-ideas" target="_blank">GitHub</a> · <a href="#" id="footer-help">快捷键</a></span>
   </footer>
 
   <script src="assets/app.js"></script>
