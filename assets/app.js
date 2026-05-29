@@ -28,6 +28,67 @@
   let filter = { tag: '', priority: '', search: '' };
   let editingId = null;
   let undoStack = [];       // last operations for undo
+
+  // ============ AI CLASSIFIER (Yunwu / DeepSeek) ============
+  const AI_CONFIG = {
+    endpoint: 'https://yunwu.ai/v1/chat/completions',
+    apiKey:   'sk-NQ9p5vJPaw7MQDDxYbtRglNVw1jSotR9Dhj6ObAnT2JZKII6',
+    model:    'deepseek-v4-flash',
+    timeoutMs: 12000
+  };
+  const AI_SYSTEM_PROMPT = '你是一个分类器。判断用户输入是 todo（待办）还是 idea（想法/灵感）。todo 是具体可执行的行动（买东西、约会、回邮件、修 bug 等）；idea 是需要思考、探索、未成型的点子或愿望（"做一个 XX"、"如果 XX 会怎样"、"研究一下 XX"）。只输出严格 JSON：{"type":"todo"|"idea","confidence":0-1,"reason":"简短中文理由(不超过20字)"}';
+
+  /**
+   * Classify a free-form text input as 'todo' or 'idea' via the Yunwu LLM API.
+   * Falls back to a tiny local heuristic when network/parse fails.
+   * @returns {Promise<{type:'todo'|'idea', confidence:number, reason:string, source:'ai'|'fallback'}>}
+   */
+  async function classifyWithAI(text) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), AI_CONFIG.timeoutMs);
+    try {
+      const res = await fetch(AI_CONFIG.endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + AI_CONFIG.apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: AI_CONFIG.model,
+          messages: [
+            { role: 'system', content: AI_SYSTEM_PROMPT },
+            { role: 'user',   content: text }
+          ],
+          max_tokens: 300,
+          response_format: { type: 'json_object' }
+        }),
+        signal: ctrl.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content || '';
+      const parsed = JSON.parse(content);
+      const type = parsed.type === 'todo' ? 'todo' : 'idea';
+      const conf = typeof parsed.confidence === 'number' ? parsed.confidence : 0.7;
+      return { type, confidence: conf, reason: parsed.reason || '', source: 'ai' };
+    } catch (err) {
+      clearTimeout(timer);
+      console.warn('[AI classify failed, using local fallback]', err);
+      return { ...localHeuristicClassify(text), source: 'fallback' };
+    }
+  }
+
+  /** Tiny rule-based fallback so the app always works offline / on API failure. */
+  function localHeuristicClassify(text) {
+    const t = (text || '').trim().toLowerCase();
+    const todoHints = /(买|打|发|写|交|提交|回复|约|预约|联系|开会|开始|完成|修复|修一下|修复|订|订票|订机票|报名|续|续费|续约|读完|看完|提交|提交一下|安排|安排一下|today|tomorrow|明天|今天|后天|本周|下周|周一|周二|周三|周四|周五|周六|周日|截止|deadline|due)/i;
+    const ideaHints = /(也许|或许|如果|要是|想做|想搞|想写|做一个|搞一个|研究|探索|思考|考虑|灵感|点子|idea|maybe|可以做|可以试|是否)/i;
+    if (ideaHints.test(t)) return { type: 'idea', confidence: 0.7, reason: '本地规则：含探索性词汇' };
+    if (todoHints.test(t)) return { type: 'todo', confidence: 0.7, reason: '本地规则：含具体行动/时间' };
+    if (t.length <= 12) return { type: 'todo', confidence: 0.55, reason: '本地规则：短句默认待办' };
+    return { type: 'idea', confidence: 0.55, reason: '本地规则：默认归为想法' };
+  }
   let autosyncTimer = null;
   let lastSyncAt = 0;
   let doneCollapsed = false;
@@ -527,18 +588,93 @@
     const due = $('#quick-due');
     const rep = $('#quick-repeat');
 
-    input.addEventListener('keydown', e => {
+    let busy = false;
+
+    input.addEventListener('keydown', async e => {
       if (e.key !== 'Enter') return;
-      const status = e.shiftKey ? 'todo' : 'idea';
-      const ok = addItem({
-        title: input.value, status,
+      e.preventDefault();
+      if (busy) return;
+
+      const title = input.value.trim();
+      if (!title) return;
+
+      // Escape hatches: shift = force todo, ctrl/cmd = force idea
+      const forced = e.shiftKey ? 'todo' : (e.metaKey || e.ctrlKey) ? 'idea' : null;
+      const meta = {
         tag: tag.value, priority: prio.value, due: due.value, repeat: rep.value
-      });
-      if (ok) {
-        input.value = ''; tag.value = ''; prio.value = ''; due.value = ''; rep.value = '';
-        toast(status === 'idea' ? '💡 灵感已记录' : '✅ 任务已添加');
+      };
+
+      if (forced) {
+        const ok = addItem({ title, status: forced, ...meta });
+        if (ok) {
+          resetQuickAdd();
+          toast(forced === 'idea' ? '💡 灵感已记录' : '✅ 任务已添加');
+        }
+        return;
+      }
+
+      // AI auto-classify path
+      busy = true;
+      input.classList.add('ai-thinking');
+      const originalPlaceholder = input.placeholder;
+      input.placeholder = '🤖 AI 正在判断…';
+      input.disabled = true;
+      try {
+        const result = await classifyWithAI(title);
+        const ok = addItem({ title, status: result.type, ...meta });
+        if (ok) {
+          resetQuickAdd();
+          showClassifyToast(result, title, meta);
+        }
+      } finally {
+        busy = false;
+        input.classList.remove('ai-thinking');
+        input.placeholder = originalPlaceholder;
+        input.disabled = false;
+        setTimeout(() => input.focus(), 0);
       }
     });
+
+    function resetQuickAdd() {
+      input.value = ''; tag.value = ''; prio.value = ''; due.value = ''; rep.value = '';
+    }
+  }
+
+  /**
+   * Show a classification toast with the AI verdict + an "改判" action that
+   * moves the most-recently-added item to the opposite column. Falls back to
+   * a plain toast if #toast-action infrastructure isn't present.
+   */
+  function showClassifyToast(result, title, meta) {
+    const icon = result.type === 'idea' ? '💡' : '✅';
+    const label = result.type === 'idea' ? 'Idea' : 'Todo';
+    const tag = result.source === 'ai' ? '🤖' : '📐';
+    const conf = Math.round((result.confidence || 0) * 100);
+    const reason = result.reason ? ` · ${result.reason}` : '';
+    const msg = `${icon} 已归为 ${label} ${tag}${conf ? ` ${conf}%` : ''}${reason}　点这里改判 →`;
+
+    const el = $('#toast');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    el.classList.add('clickable');
+    // capture last added item id (most recent non-deleted)
+    const lastId = items.filter(x => !x.deleted).slice(-1)[0]?.id;
+    const onClick = () => {
+      if (!lastId) return;
+      const it = items.find(x => x.id === lastId);
+      if (!it) return;
+      it.status = it.status === 'idea' ? 'todo' : 'idea';
+      it.updatedAt = Date.now();
+      saveItems(); render();
+      toast(it.status === 'idea' ? '↩️ 已改判为 Idea' : '↩️ 已改判为 Todo');
+    };
+    el.onclick = onClick;
+    clearTimeout(showClassifyToast._t);
+    showClassifyToast._t = setTimeout(() => {
+      el.classList.add('hidden');
+      el.classList.remove('clickable');
+      el.onclick = null;
+    }, 4500);
   }
 
   // ============ FILTERS & SEARCH ============

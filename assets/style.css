@@ -245,6 +245,28 @@ kbd {
   font-weight: 500;
 }
 #quick-input::placeholder { color: var(--text-muted); font-weight: 400; }
+
+/* AI thinking state — animated gradient sweep on the input border */
+.quick-add:has(#quick-input.ai-thinking) {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    linear-gradient(90deg, #a78bfa, #60a5fa, #34d399, #a78bfa) border-box;
+  background-size: 100% 100%, 300% 100%;
+  animation: aiSweep 1.6s linear infinite;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, .12);
+}
+#quick-input.ai-thinking { color: var(--text-muted); cursor: progress; }
+#quick-input.ai-thinking::placeholder {
+  background: linear-gradient(90deg, #a78bfa, #60a5fa, #34d399, #a78bfa);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: aiText 1.6s linear infinite;
+  font-weight: 500;
+}
+@keyframes aiSweep { from { background-position: 0 0, 0 0; } to { background-position: 0 0, 300% 0; } }
+@keyframes aiText  { from { background-position: 0 0; } to { background-position: 200% 0; } }
 .quick-meta {
   display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;
 }
@@ -591,6 +613,8 @@ button.danger:hover { background: rgba(239,68,68,.08); }
   display: flex; align-items: center; gap: 12px;
 }
 .toast.hidden { display: none; }
+.toast.clickable { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+.toast.clickable:hover { transform: translateX(-50%) translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,.18); }
 .toast.undo { background: #1f2937; color: white; }
 .toast.undo button {
   background: transparent; color: #fbbf24;
