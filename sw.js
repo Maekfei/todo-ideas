@@ -1,5 +1,5 @@
 /* Flow Board service worker — offline-first cache */
-const CACHE = 'flowboard-v2';
+const CACHE = 'flowboard-v3-ai';
 const ASSETS = [
   './',
   './index.html',
