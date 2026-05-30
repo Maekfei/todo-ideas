@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>💡 Flow Board · Ideas → Todos → Done</title>
-  <meta name="description" content="Capture ideas, ship todos. A Notion-style flow board with drag-and-drop, GitHub sync, keyboard shortcuts, and PWA support." />
+  <meta name="description" content="Capture ideas, ship todos. A Notion-style flow board with AI smart-input, drag-and-drop, GitHub sync, keyboard shortcuts, and PWA support." />
   <meta name="theme-color" content="#fbfbfa" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E💡%3C/text%3E%3C/svg%3E" />
   <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E💡%3C/text%3E%3C/svg%3E" />
@@ -12,7 +12,6 @@
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
-  <!-- Subtle gradient line at top -->
   <div class="brand-line"></div>
 
   <!-- ========= HEADER ========= -->
@@ -26,8 +25,9 @@
     </div>
     <div class="topbar-actions">
       <div class="search-wrap">
-        <input id="search" type="search" placeholder="🔍 搜索   /  快捷键" />
+        <input id="search" type="search" placeholder="🔍 搜索   ·   按 / 聚焦" />
       </div>
+      <button id="reclassify-all-btn" class="icon-btn" title="🤖 让 AI 重判所有未完成项">🪄</button>
       <button id="help-btn"  class="icon-btn" title="快捷键 (?)">⌨️</button>
       <button id="stats-btn" class="icon-btn" title="统计">📊</button>
       <button id="theme-btn" class="icon-btn" title="切换深浅色">🌙</button>
@@ -36,20 +36,20 @@
     </div>
   </header>
 
-  <!-- ========= GREETING + TODAY FOCUS ========= -->
+  <!-- ========= GREETING + TODAY FOCUS HERO ========= -->
   <section class="hero">
     <div class="greeting">
       <h2 id="greeting-text">👋 Hi</h2>
       <p id="greeting-sub" class="muted"></p>
     </div>
-    <div class="today-focus" id="today-focus">
+    <div class="today-hero" id="today-hero">
       <!-- populated by JS -->
     </div>
   </section>
 
   <!-- ========= QUICK ADD ========= -->
   <section class="quick-add">
-    <input id="quick-input" type="text" placeholder="✨ 写下一个想法或任务，AI 自动分类  (Enter · Shift+Enter 强制 Todo · Ctrl+Enter 强制 Idea)" />
+    <input id="quick-input" type="text" placeholder="✨ 例：周三前交开题报告 #学习 — AI 自动分类、定优先级、识别截止日和标签" />
     <div class="quick-meta">
       <select id="quick-tag"><option value="">🏷️ 标签</option></select>
       <select id="quick-priority">
@@ -62,23 +62,31 @@
       <select id="quick-repeat" title="重复">
         <option value="">🔁 不重复</option>
         <option value="daily">每天</option>
+        <option value="weekdays">工作日</option>
         <option value="weekly">每周</option>
         <option value="monthly">每月</option>
       </select>
     </div>
+    <p class="quick-hint">
+      <kbd>Enter</kbd> AI 智能分类 · <kbd>Shift+Enter</kbd> 强制 Todo · <kbd>Ctrl+Enter</kbd> 强制 Idea
+    </p>
   </section>
 
   <!-- ========= FILTERS ========= -->
   <section class="filters">
     <div class="filter-group" data-key="tag" id="filter-tags">
       <button class="chip active" data-value="">全部标签</button>
-      <!-- dynamic tags injected here -->
     </div>
     <div class="filter-group" data-key="priority">
       <button class="chip active" data-value="">全部优先级</button>
       <button class="chip" data-value="high">🔴 高</button>
       <button class="chip" data-value="mid">🟡 中</button>
       <button class="chip" data-value="low">🟢 低</button>
+    </div>
+    <div class="filter-group" data-key="quickfilter" id="filter-quick">
+      <button class="chip" data-value="today">📍 今天</button>
+      <button class="chip" data-value="overdue">⚠️ 逾期</button>
+      <button class="chip" data-value="high">🔴 高优先级</button>
     </div>
   </section>
 
@@ -135,6 +143,22 @@
       <button class="modal-close" data-close="settings-modal">✕</button>
       <h2>⚙️ 设置</h2>
 
+      <h3>🤖 AI 智能分类</h3>
+      <p class="hint">用于「快速添加」时自动判断 idea/todo、识别优先级、截止日期、标签。<b>不配置也能用</b>（走本地规则）。</p>
+      <label class="field">
+        <span>API 端点</span>
+        <input id="cfg-ai-endpoint" type="text" placeholder="https://yunwu.ai/v1/chat/completions" />
+      </label>
+      <label class="field">
+        <span>API Key</span>
+        <input id="cfg-ai-key" type="password" placeholder="sk-..." />
+        <small>OpenAI 兼容接口（云雾、DeepSeek、SiliconFlow、OpenRouter 都行）。仅保存在本机 localStorage。</small>
+      </label>
+      <label class="field">
+        <span>模型名</span>
+        <input id="cfg-ai-model" type="text" placeholder="deepseek-chat" />
+      </label>
+
       <h3>☁️ GitHub 同步</h3>
       <p class="hint">数据默认保存在浏览器，可选启用 GitHub Issues 云端同步（多设备访问）。修改后会<b>每 30 秒自动推送</b>。</p>
       <label class="field">
@@ -152,7 +176,7 @@
         <span style="font-weight:400">启动时自动从云端拉取，修改后自动推送</span>
       </label>
       <div class="form-actions">
-        <button id="cfg-save" class="primary">保存</button>
+        <button id="cfg-save" class="primary">保存所有设置</button>
         <button id="cfg-pull" class="ghost">⬇️ 立即拉取</button>
         <button id="cfg-push" class="ghost">⬆️ 立即推送</button>
       </div>
@@ -212,13 +236,20 @@
           <select id="edit-repeat">
             <option value="">不重复</option>
             <option value="daily">每天</option>
+            <option value="weekdays">工作日</option>
             <option value="weekly">每周</option>
             <option value="monthly">每月</option>
           </select>
         </label>
       </div>
+      <label class="field" id="edit-subtasks-field" style="display:none">
+        <span>🤖 AI 拆解的子任务</span>
+        <div id="edit-subtasks-list"></div>
+        <small>勾选后保存会作为新 Todo 加入</small>
+      </label>
       <div class="form-actions">
         <button id="edit-save" class="primary">保存 (⌘+Enter)</button>
+        <button id="edit-reclassify" class="ghost" title="让 AI 重新判断这张卡">🤖 AI 重判</button>
         <button id="edit-delete" class="danger">🗑️ 删除</button>
       </div>
     </div>
@@ -229,23 +260,37 @@
     <div class="modal-card">
       <button class="modal-close" data-close="help-modal">✕</button>
       <h2>⌨️ 快捷键</h2>
+      <h3>快速添加</h3>
       <table class="shortcuts">
         <tr><td><kbd>N</kbd></td><td>聚焦快速添加框</td></tr>
         <tr><td><kbd>/</kbd></td><td>聚焦搜索</td></tr>
-        <tr><td><kbd>Enter</kbd></td><td>添加为 💡 idea</td></tr>
-        <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>添加为 ✅ todo</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>AI 智能分类（一句话录入）</td></tr>
+        <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>强制添加为 ✅ todo</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td>强制添加为 💡 idea</td></tr>
+      </table>
+      <h3>键盘流（焦点在卡片时）</h3>
+      <table class="shortcuts">
+        <tr><td><kbd>J</kbd> / <kbd>↓</kbd></td><td>下一张卡</td></tr>
+        <tr><td><kbd>K</kbd> / <kbd>↑</kbd></td><td>上一张卡</td></tr>
+        <tr><td><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></td><td>切到 Idea / Todo / Done</td></tr>
+        <tr><td><kbd>!</kbd> / <kbd>@</kbd> / <kbd>#</kbd></td><td>设优先级 高 / 中 / 低</td></tr>
+        <tr><td><kbd>T</kbd></td><td>设置今天到期</td></tr>
+        <tr><td><kbd>E</kbd> / <kbd>Enter</kbd></td><td>编辑</td></tr>
+        <tr><td><kbd>D</kbd> / <kbd>Backspace</kbd></td><td>删除</td></tr>
+        <tr><td><kbd>R</kbd></td><td>🤖 AI 重判此卡</td></tr>
+      </table>
+      <h3>全局</h3>
+      <table class="shortcuts">
         <tr><td><kbd>?</kbd></td><td>显示此帮助</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>关闭弹窗 / 取消</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>关闭弹窗 / 取消选中</td></tr>
         <tr><td><kbd>⌘/Ctrl</kbd> + <kbd>Z</kbd></td><td>撤销最近操作</td></tr>
-        <tr><td><kbd>⌘/Ctrl</kbd> + <kbd>Enter</kbd></td><td>编辑弹窗中保存</td></tr>
-        <tr><td><kbd>T</kbd></td><td>切换深浅色主题</td></tr>
-        <tr><td><kbd>S</kbd></td><td>立即同步到 GitHub</td></tr>
-        <tr><td colspan="2" class="hint" style="padding-top:14px">💡 双击卡片可编辑 · 拖拽卡片在三列间流转</td></tr>
+        <tr><td><kbd>⇧</kbd> + <kbd>T</kbd></td><td>切换深浅色主题</td></tr>
+        <tr><td><kbd>⇧</kbd> + <kbd>S</kbd></td><td>立即同步到 GitHub</td></tr>
       </table>
     </div>
   </div>
 
-  <!-- ========= UNDO TOAST (special, has button) ========= -->
+  <!-- ========= UNDO TOAST ========= -->
   <div id="undo-toast" class="toast undo hidden">
     <span id="undo-text">已删除</span>
     <button id="undo-btn">↶ 撤销</button>

@@ -24,42 +24,61 @@
 
   let items = [];           // includes tombstones (deleted: true)
   let tags = [];
-  let settings = { token: '', repo: '', autosync: false };
-  let filter = { tag: '', priority: '', search: '' };
+  let settings = {
+    token: '', repo: '', autosync: false,
+    aiEndpoint: 'https://yunwu.ai/v1/chat/completions',
+    aiKey: '',
+    aiModel: 'deepseek-chat'
+  };
+  let filter = { tag: '', priority: '', search: '', quickfilter: '' };
   let editingId = null;
   let undoStack = [];       // last operations for undo
+  let selectedCardId = null; // keyboard-selected card
 
-  // ============ AI CLASSIFIER (Yunwu / DeepSeek) ============
-  const AI_CONFIG = {
-    endpoint: 'https://yunwu.ai/v1/chat/completions',
-    apiKey:   'sk-NQ9p5vJPaw7MQDDxYbtRglNVw1jSotR9Dhj6ObAnT2JZKII6',
-    model:    'deepseek-v4-flash',
-    timeoutMs: 12000
-  };
-  const AI_SYSTEM_PROMPT = '你是一个分类器。判断用户输入是 todo（待办）还是 idea（想法/灵感）。todo 是具体可执行的行动（买东西、约会、回邮件、修 bug 等）；idea 是需要思考、探索、未成型的点子或愿望（"做一个 XX"、"如果 XX 会怎样"、"研究一下 XX"）。只输出严格 JSON：{"type":"todo"|"idea","confidence":0-1,"reason":"简短中文理由(不超过20字)"}';
+  // ============ AI CLASSIFIER (configurable, OpenAI-compatible) ============
+  const AI_TIMEOUT_MS = 15000;
+
+  function buildAIPrompt() {
+    const tagList = tags.map(t => t.name).join('、') || '工作、学习、生活、项目';
+    return `你是个人任务管家。分析用户的一句话输入，输出严格 JSON：
+{"type":"todo"|"idea","priority":"high"|"mid"|"low"|"","due":"YYYY-MM-DD"|"","tags":["标签1"],"subtasks":["子任务1","子任务2"],"confidence":0-1,"reason":"≤20字理由"}
+
+判定规则：
+- todo = 具体可执行的行动（买/写/交/约/修/订/完成等，或带具体时间）
+- idea = 探索性、未成型的想法（"做一个XX"、"研究一下"、"如果XX会怎样"）
+- priority: 含"紧急/重要/!/截止/明天前"=high；含具体时间或行动=mid；探索性/无时间=low/""
+- due: 当前日期 ${todayStr()}。识别相对时间："今天/明天/后天/本周三/下周二/3号前/月底"等转 ISO YYYY-MM-DD；无则 ""
+- tags: 从这些里选（可多选，最多2个）：${tagList}。识别 #标签 显式标记。无明显类别则 []
+- subtasks: 仅当输入像"做一个XX网站/搭建XX/开发XX/写一份XX报告"这种复杂目标时，拆 3-5 个具体小步骤；否则 []
+- confidence: 你的置信度 0-1
+- reason: 中文，简短，≤20字`;
+  }
 
   /**
-   * Classify a free-form text input as 'todo' or 'idea' via the Yunwu LLM API.
-   * Falls back to a tiny local heuristic when network/parse fails.
-   * @returns {Promise<{type:'todo'|'idea', confidence:number, reason:string, source:'ai'|'fallback'}>}
+   * Classify free-form text via configured LLM API. Returns rich object:
+   * { type, priority, due, tags, subtasks, confidence, reason, source }
+   * Falls back to local heuristic when no key configured / API fails.
    */
   async function classifyWithAI(text) {
+    if (!settings.aiKey) {
+      return { ...localHeuristicClassify(text), source: 'fallback' };
+    }
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), AI_CONFIG.timeoutMs);
+    const timer = setTimeout(() => ctrl.abort(), AI_TIMEOUT_MS);
     try {
-      const res = await fetch(AI_CONFIG.endpoint, {
+      const res = await fetch(settings.aiEndpoint, {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer ' + AI_CONFIG.apiKey,
+          'Authorization': 'Bearer ' + settings.aiKey,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: AI_CONFIG.model,
+          model: settings.aiModel,
           messages: [
-            { role: 'system', content: AI_SYSTEM_PROMPT },
+            { role: 'system', content: buildAIPrompt() },
             { role: 'user',   content: text }
           ],
-          max_tokens: 300,
+          max_tokens: 600,
           response_format: { type: 'json_object' }
         }),
         signal: ctrl.signal
@@ -69,9 +88,16 @@
       const data = await res.json();
       const content = data?.choices?.[0]?.message?.content || '';
       const parsed = JSON.parse(content);
-      const type = parsed.type === 'todo' ? 'todo' : 'idea';
-      const conf = typeof parsed.confidence === 'number' ? parsed.confidence : 0.7;
-      return { type, confidence: conf, reason: parsed.reason || '', source: 'ai' };
+      return {
+        type: parsed.type === 'todo' ? 'todo' : 'idea',
+        priority: ['high', 'mid', 'low'].includes(parsed.priority) ? parsed.priority : '',
+        due: typeof parsed.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.due) ? parsed.due : '',
+        tags: Array.isArray(parsed.tags) ? parsed.tags.filter(t => typeof t === 'string').slice(0, 2) : [],
+        subtasks: Array.isArray(parsed.subtasks) ? parsed.subtasks.filter(s => typeof s === 'string' && s.trim()).slice(0, 5) : [],
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.7,
+        reason: parsed.reason || '',
+        source: 'ai'
+      };
     } catch (err) {
       clearTimeout(timer);
       console.warn('[AI classify failed, using local fallback]', err);
@@ -79,15 +105,51 @@
     }
   }
 
-  /** Tiny rule-based fallback so the app always works offline / on API failure. */
+  /** Tiny rule-based fallback. Now also extracts priority/due/tags from common patterns. */
   function localHeuristicClassify(text) {
-    const t = (text || '').trim().toLowerCase();
-    const todoHints = /(买|打|发|写|交|提交|回复|约|预约|联系|开会|开始|完成|修复|修一下|修复|订|订票|订机票|报名|续|续费|续约|读完|看完|提交|提交一下|安排|安排一下|today|tomorrow|明天|今天|后天|本周|下周|周一|周二|周三|周四|周五|周六|周日|截止|deadline|due)/i;
+    const raw = (text || '').trim();
+    const t = raw.toLowerCase();
+    const out = { type: 'idea', priority: '', due: '', tags: [], subtasks: [], confidence: 0.55, reason: '本地规则' };
+
+    // tags: #xxx
+    const tagMatches = raw.match(/#([\u4e00-\u9fa5\w]+)/g);
+    if (tagMatches) {
+      const found = tagMatches.map(m => m.slice(1));
+      out.tags = found.filter(name => tags.find(t => t.name === name)).slice(0, 2);
+    }
+
+    // priority
+    if (/(紧急|重要|!{1,3}|高优|asap)/i.test(raw)) out.priority = 'high';
+    else if (/(顺手|有空|低优)/i.test(raw)) out.priority = 'low';
+
+    // due — relative dates
+    const today = new Date();
+    const setDue = d => { out.due = d.toISOString().slice(0, 10); };
+    if (/今天|today/i.test(raw)) setDue(today);
+    else if (/明天|tomorrow/i.test(raw)) { const d = new Date(today); d.setDate(d.getDate() + 1); setDue(d); }
+    else if (/后天/.test(raw)) { const d = new Date(today); d.setDate(d.getDate() + 2); setDue(d); }
+    else {
+      const wkMap = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0 };
+      const m = raw.match(/(本|下)?周([一二三四五六日天])/);
+      if (m) {
+        const target = wkMap[m[2]];
+        const cur = today.getDay();
+        let add = (target - cur + 7) % 7;
+        if (m[1] === '下' || add === 0) add += 7;
+        const d = new Date(today); d.setDate(d.getDate() + add); setDue(d);
+      }
+    }
+
+    // type
+    const todoHints = /(买|打|发|写|交|提交|回复|约|预约|联系|开会|开始|完成|修复|修一下|订|订票|订机票|报名|续|续费|续约|读完|看完|安排|today|tomorrow|明天|今天|后天|本周|下周|周一|周二|周三|周四|周五|周六|周日|截止|deadline|due|前交|交开题|报告)/i;
     const ideaHints = /(也许|或许|如果|要是|想做|想搞|想写|做一个|搞一个|研究|探索|思考|考虑|灵感|点子|idea|maybe|可以做|可以试|是否)/i;
-    if (ideaHints.test(t)) return { type: 'idea', confidence: 0.7, reason: '本地规则：含探索性词汇' };
-    if (todoHints.test(t)) return { type: 'todo', confidence: 0.7, reason: '本地规则：含具体行动/时间' };
-    if (t.length <= 12) return { type: 'todo', confidence: 0.55, reason: '本地规则：短句默认待办' };
-    return { type: 'idea', confidence: 0.55, reason: '本地规则：默认归为想法' };
+    if (out.due || out.priority === 'high') { out.type = 'todo'; out.confidence = 0.75; out.reason = '本地规则：识别到时间/优先级'; }
+    else if (ideaHints.test(t)) { out.type = 'idea'; out.confidence = 0.7; out.reason = '本地规则：含探索性词汇'; }
+    else if (todoHints.test(t)) { out.type = 'todo'; out.confidence = 0.7; out.reason = '本地规则：含具体行动'; }
+    else if (t.length <= 12) { out.type = 'todo'; out.confidence = 0.55; out.reason = '本地规则：短句默认待办'; }
+    else { out.type = 'idea'; out.confidence = 0.55; out.reason = '本地规则：默认归为想法'; }
+
+    return out;
   }
   let autosyncTimer = null;
   let lastSyncAt = 0;
@@ -183,23 +245,78 @@
   function alive() { return items.filter(x => !x.deleted); }
 
   // ============ CRUD ============
-  function addItem({ title, status = 'idea', tag = '', priority = '', due = '', repeat = '' }) {
+  function addItem({ title, status = 'idea', tag = '', priority = '', due = '', repeat = '', note = '', aiClassified = false, parentId = '' }) {
     if (!title || !title.trim()) return null;
     const item = {
       id: uid(),
       title: title.trim(),
-      note: '',
+      note,
       status,
       tag, priority, due, repeat,
       createdAt: now(),
       updatedAt: now(),
       completedAt: status === 'done' ? now() : '',
-      deleted: false
+      deleted: false,
+      aiClassified: !!aiClassified,
+      parentId: parentId || ''
     };
     items.unshift(item);
     saveItems();
     render();
     return item;
+  }
+
+  /**
+   * Apply an AI classification result to an existing card (status + priority + due + tag).
+   * Marks aiClassified=true so the badge stays until user manually edits.
+   * Subtasks are NOT auto-spawned here — caller decides via toast/UI.
+   */
+  function applyAIResult(id, result) {
+    const it = items.find(x => x.id === id);
+    if (!it) return;
+    const patch = { status: result.type, aiClassified: true };
+    if (result.priority) patch.priority = result.priority;
+    if (result.due) patch.due = result.due;
+    if (result.tags && result.tags.length > 0 && tags.find(t => t.name === result.tags[0])) {
+      patch.tag = result.tags[0]; // single-select for now; multi-tag would need schema bump
+    }
+    updateItem(id, patch, { silent: true });
+  }
+
+  /** Reclassify a single card. Returns the AI result for caller to react. */
+  async function reclassifyCard(id) {
+    const it = items.find(x => x.id === id);
+    if (!it) return null;
+    toast('🤖 AI 思考中…', 1200);
+    const result = await classifyWithAI(it.title + (it.note ? '\n' + it.note : ''));
+    applyAIResult(id, result);
+    const tag = result.source === 'ai' ? '🤖 AI' : '📐 规则';
+    toast(`${tag} 已重判为 ${result.type === 'idea' ? '💡 Idea' : '✅ Todo'}${result.reason ? ' · ' + result.reason : ''}`, 3000);
+    return result;
+  }
+
+  /** Reclassify every alive idea/todo card in series with progress feedback. */
+  async function reclassifyAll() {
+    const targets = alive().filter(x => x.status !== 'done');
+    if (targets.length === 0) { toast('没有需要重判的卡片'); return; }
+    if (targets.length > 20 && !confirm(`将对 ${targets.length} 张卡片调用 AI 重判，确认继续？`)) return;
+    const btn = $('#reclassify-all-btn');
+    if (btn) btn.classList.add('spin');
+    let ok = 0, fail = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const it = targets[i];
+      toast(`🤖 重判中 ${i + 1}/${targets.length} · ${it.title.slice(0, 18)}…`, 60000);
+      try {
+        const result = await classifyWithAI(it.title + (it.note ? '\n' + it.note : ''));
+        applyAIResult(it.id, result);
+        if (result.source === 'ai') ok++; else fail++;
+      } catch { fail++; }
+      // gentle pacing to avoid rate limits
+      if (settings.aiKey) await new Promise(r => setTimeout(r, 250));
+    }
+    if (btn) btn.classList.remove('spin');
+    render();
+    toast(`✅ 重判完成 · AI: ${ok} · 本地规则: ${fail}`, 4000);
   }
 
   function updateItem(id, patch, opts = {}) {
@@ -297,27 +414,63 @@
             (it.note || '').toLowerCase().includes(q) ||
             (it.tag || '').toLowerCase().includes(q))) return false;
     }
+    if (filter.quickfilter) {
+      const today = todayStr();
+      if (filter.quickfilter === 'today') {
+        if (it.due !== today || it.status === 'done') return false;
+      } else if (filter.quickfilter === 'overdue') {
+        if (!it.due || it.due >= today || it.status === 'done') return false;
+      } else if (filter.quickfilter === 'high') {
+        if (it.priority !== 'high' || it.status === 'done') return false;
+      }
+    }
     return true;
+  }
+
+  /** Bucket a todo card by due date for time-grouped rendering. */
+  function todoBucket(it) {
+    if (!it.due) return { key: 'noDate', label: '❓ 无日期', order: 99 };
+    const today = todayStr();
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    if (it.due < today)    return { key: 'overdue',  label: '🔥 已逾期',  order: 0 };
+    if (it.due === today)  return { key: 'today',    label: '📍 今天',    order: 1 };
+    if (it.due === tomorrow) return { key: 'tomorrow', label: '⏭️ 明天', order: 2 };
+    if (it.due <= weekEnd) return { key: 'thisweek', label: '📅 本周内', order: 3 };
+    return                    { key: 'later',    label: '🗓️ 之后',    order: 4 };
+  }
+
+  /** Bucket a done card by completion date. */
+  function doneBucket(it) {
+    if (!it.completedAt) return { key: 'older', label: '🗂️ 更早', order: 9 };
+    const completed = it.completedAt.slice(0, 10);
+    const today = todayStr();
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    if (completed === today)     return { key: 'today',     label: '🎉 今天完成', order: 0 };
+    if (completed === yesterday) return { key: 'yesterday', label: '✨ 昨天完成', order: 1 };
+    return { key: 'older', label: '🗂️ 更早', order: 9 };
   }
 
   function render() {
     const all = alive();
+    const prioRank = { high: 3, mid: 2, low: 1, '': 0 };
+    const sortFn = (status) => (a, b) => {
+      const pa = prioRank[a.priority] || 0, pb = prioRank[b.priority] || 0;
+      if (pa !== pb) return pb - pa;
+      if (a.due && b.due) return a.due.localeCompare(b.due);
+      if (a.due) return -1;
+      if (b.due) return 1;
+      const at = status === 'done' ? (a.completedAt || a.createdAt) : a.createdAt;
+      const bt = status === 'done' ? (b.completedAt || b.createdAt) : b.createdAt;
+      return bt.localeCompare(at);
+    };
+
     ['idea', 'todo', 'done'].forEach(status => {
       const col = document.querySelector(`.col-body[data-drop="${status}"]`);
       let list = all.filter(it => it.status === status && passesFilter(it));
-      const prioRank = { high: 3, mid: 2, low: 1, '': 0 };
-      list.sort((a, b) => {
-        const pa = prioRank[a.priority] || 0, pb = prioRank[b.priority] || 0;
-        if (pa !== pb) return pb - pa;
-        if (a.due && b.due) return a.due.localeCompare(b.due);
-        if (a.due) return -1;
-        if (b.due) return 1;
-        const at = status === 'done' ? (a.completedAt || a.createdAt) : a.createdAt;
-        const bt = status === 'done' ? (b.completedAt || b.createdAt) : b.createdAt;
-        return bt.localeCompare(at);
-      });
-
+      list.sort(sortFn(status));
       col.innerHTML = '';
+
       if (list.length === 0) {
         const hint = document.createElement('div');
         hint.className = 'empty-hint';
@@ -327,6 +480,42 @@
           ? '<span class="empty-emoji">🎯</span><div class="empty-title">没有待办</div><div class="empty-sub">把灵感拖到这里，或 Shift+Enter 直接添加</div>'
           : '<span class="empty-emoji">🏁</span><div class="empty-title">尚未完成任何任务</div><div class="empty-sub">坚持就是胜利</div>';
         col.appendChild(hint);
+      } else if (status === 'todo' && !filter.quickfilter && list.length >= 4) {
+        // Time-grouped rendering for Todos column
+        const groups = {};
+        list.forEach(it => {
+          const b = todoBucket(it);
+          if (!groups[b.key]) groups[b.key] = { ...b, items: [] };
+          groups[b.key].items.push(it);
+        });
+        Object.values(groups).sort((a, b) => a.order - b.order).forEach(g => {
+          const wrap = document.createElement('div');
+          wrap.className = 'card-group group-' + g.key;
+          const head = document.createElement('div');
+          head.className = 'card-group-header';
+          head.innerHTML = `${g.label} <span class="group-count">${g.items.length}</span>`;
+          wrap.appendChild(head);
+          g.items.forEach(it => wrap.appendChild(renderCard(it)));
+          col.appendChild(wrap);
+        });
+      } else if (status === 'done' && list.length >= 3) {
+        // Time-grouped rendering for Done column
+        const groups = {};
+        list.forEach(it => {
+          const b = doneBucket(it);
+          if (!groups[b.key]) groups[b.key] = { ...b, items: [] };
+          groups[b.key].items.push(it);
+        });
+        Object.values(groups).sort((a, b) => a.order - b.order).forEach(g => {
+          const wrap = document.createElement('div');
+          wrap.className = 'card-group group-done-' + g.key;
+          const head = document.createElement('div');
+          head.className = 'card-group-header';
+          head.innerHTML = `${g.label} <span class="group-count">${g.items.length}</span>`;
+          wrap.appendChild(head);
+          g.items.forEach(it => wrap.appendChild(renderCard(it)));
+          col.appendChild(wrap);
+        });
       } else {
         list.forEach(it => col.appendChild(renderCard(it)));
       }
@@ -341,14 +530,31 @@
     renderTodayFocus();
     updateGreeting();
     refreshTagUI();
+
+    // Re-apply selected highlight after re-render
+    if (selectedCardId) {
+      const sel = document.querySelector(`.card[data-id="${selectedCardId}"]`);
+      if (sel) sel.classList.add('selected');
+      else selectedCardId = null;
+    }
   }
 
   function renderCard(it) {
     const card = document.createElement('div');
     card.className = 'card' + (it.status === 'done' ? ' done' : '')
-                   + (it.priority ? ' priority-' + it.priority : '');
+                   + (it.priority ? ' priority-' + it.priority : '')
+                   + (it.aiClassified ? ' ai-classified' : '');
     card.draggable = true;
     card.dataset.id = it.id;
+
+    // 🤖 AI badge (top-right)
+    if (it.aiClassified) {
+      const badge = document.createElement('span');
+      badge.className = 'card-ai-badge';
+      badge.textContent = '🤖 AI';
+      badge.title = 'AI 自动判断（编辑后消失）';
+      card.appendChild(badge);
+    }
 
     const actions = document.createElement('div');
     actions.className = 'card-actions';
@@ -361,6 +567,7 @@
     if (it.status === 'done') {
       actions.appendChild(makeAction('↩️', '退回 Todo', () => updateItem(it.id, { status: 'todo' })));
     }
+    actions.appendChild(makeAction('🤖', 'AI 重判', () => reclassifyCard(it.id)));
     actions.appendChild(makeAction('✏️', '编辑', () => openEdit(it.id)));
     actions.appendChild(makeAction('🗑️', '删除', () => deleteItem(it.id)));
     card.appendChild(actions);
@@ -411,6 +618,13 @@
     }
     if (meta.children.length > 0) card.appendChild(meta);
 
+    card.addEventListener('click', e => {
+      // 忽略点击在按钮/链接上的事件
+      if (e.target.closest('.card-action') || e.target.closest('a')) return;
+      selectedCardId = it.id;
+      $$('.card.selected').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    });
     card.addEventListener('dblclick', () => openEdit(it.id));
     card.addEventListener('dragstart', e => {
       card.classList.add('dragging');
@@ -433,45 +647,65 @@
     return b;
   }
 
-  // ============ TODAY FOCUS ============
+  // ============ TODAY HERO (3 buckets) ============
   function renderTodayFocus() {
     const today = todayStr();
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-    const items_ = alive().filter(x =>
-      (x.status === 'todo' || x.status === 'idea') &&
-      (
-        (x.due && x.due <= today) ||  // overdue or today
-        x.priority === 'high'
-      )
-    );
-    const focus = $('#today-focus');
-    if (items_.length === 0) {
-      focus.classList.add('empty');
-      focus.innerHTML = '🌟 今日无紧急任务，享受当下！';
+    const all = alive().filter(x => x.status === 'todo' || x.status === 'idea');
+    const todayItems   = all.filter(x => x.due === today);
+    const overdueItems = all.filter(x => x.due && x.due < today);
+    const highItems    = all.filter(x => x.priority === 'high');
+
+    const hero = $('#today-hero') || $('#today-focus'); // 兼容旧 ID
+    if (!hero) return;
+    hero.classList.remove('empty');
+
+    if (todayItems.length === 0 && overdueItems.length === 0 && highItems.length === 0) {
+      hero.classList.add('empty');
+      hero.innerHTML = '<div class="today-hero-empty">🌟 今日无紧急任务，享受当下！</div>';
       return;
     }
-    focus.classList.remove('empty');
-    items_.sort((a, b) => {
-      const ar = (a.due && a.due < today) ? 0 : (a.due === today ? 1 : 2);
-      const br = (b.due && b.due < today) ? 0 : (b.due === today ? 1 : 2);
-      return ar - br;
-    });
-    const list = items_.slice(0, 6).map(it => {
-      let badge = '';
-      if (it.due && it.due < today) badge = '<span class="badge overdue">超期</span>';
-      else if (it.due === today) badge = '<span class="badge today">今天</span>';
-      else if (it.priority === 'high') badge = '<span class="badge high">🔴</span>';
-      return `<li class="today-item" data-id="${it.id}">${badge}${escapeHtml(it.title.slice(0, 30))}${it.title.length > 30 ? '…' : ''}</li>`;
-    }).join('');
-    focus.innerHTML = `
-      <div class="today-icon">🎯</div>
-      <div class="today-content">
-        <div class="today-title">今日聚焦 · ${items_.length} 项</div>
-        <ul class="today-list">${list}</ul>
-      </div>
-    `;
-    focus.querySelectorAll('.today-item').forEach(li => {
-      li.addEventListener('click', () => openEdit(li.dataset.id));
+
+    const bucket = (key, icon, label, items) => {
+      const cnt = items.length;
+      const has = cnt > 0;
+      const preview = items.slice(0, 3).map(it =>
+        `<li data-id="${it.id}">${escapeHtml(it.title.slice(0, 22))}${it.title.length > 22 ? '…' : ''}</li>`
+      ).join('');
+      const isActive = filter.quickfilter === key;
+      return `
+        <div class="today-bucket bucket-${key} ${has ? 'has-items' : 'empty'} ${isActive ? 'active' : ''}" data-bucket="${key}" role="button" tabindex="0">
+          <div class="today-bucket-head">
+            <span class="today-bucket-num">${cnt}</span>
+            <span class="today-bucket-label"><span class="icon">${icon}</span>${label}</span>
+          </div>
+          ${has ? `<ul class="today-bucket-list">${preview}</ul>` : ''}
+        </div>`;
+    };
+
+    hero.innerHTML =
+      bucket('today',   '📍', '今天',  todayItems) +
+      bucket('overdue', '⚠️', '逾期',  overdueItems) +
+      bucket('high',    '🔴', '高优',  highItems);
+
+    // bucket click → toggle quickfilter
+    hero.querySelectorAll('.today-bucket').forEach(el => {
+      el.addEventListener('click', e => {
+        if (e.target.tagName === 'LI' && e.target.dataset.id) {
+          openEdit(e.target.dataset.id);
+          return;
+        }
+        const key = el.dataset.bucket;
+        const newVal = filter.quickfilter === key ? '' : key;
+        filter.quickfilter = newVal;
+        // sync chip state
+        const grp = $('#filter-quick');
+        if (grp) {
+          grp.querySelectorAll('.chip').forEach(c => {
+            c.classList.toggle('active', c.dataset.value === newVal);
+          });
+        }
+        render();
+      });
     });
   }
 
@@ -621,10 +855,21 @@
       input.disabled = true;
       try {
         const result = await classifyWithAI(title);
-        const ok = addItem({ title, status: result.type, ...meta });
-        if (ok) {
+        // AI 返回的元数据用 result，表单里手动填的优先（手动 > AI）
+        const aiMeta = {
+          tag: meta.tag || (result.tags && result.tags[0] && tags.find(t => t.name === result.tags[0]) ? result.tags[0] : ''),
+          priority: meta.priority || result.priority || '',
+          due: meta.due || result.due || '',
+          repeat: meta.repeat
+        };
+        const newItem = addItem({ title, status: result.type, ...aiMeta, aiClassified: true });
+        if (newItem) {
           resetQuickAdd();
-          showClassifyToast(result, title, meta);
+          showClassifyToast(result, title, aiMeta, newItem.id);
+          // 如果 AI 拆出了子任务，弹一个二级 toast 询问是否生成
+          if (result.subtasks && result.subtasks.length > 0) {
+            offerSubtasks(newItem.id, result.subtasks);
+          }
         }
       } finally {
         busy = false;
@@ -640,12 +885,44 @@
     }
   }
 
+  /** Offer to spawn AI-suggested subtasks as child todo cards. */
+  function offerSubtasks(parentId, subs) {
+    const parent = items.find(x => x.id === parentId);
+    if (!parent || subs.length === 0) return;
+    setTimeout(() => {
+      const el = $('#toast');
+      el.textContent = `📋 AI 拆出 ${subs.length} 个子任务，点这里生成 →`;
+      el.classList.remove('hidden');
+      el.classList.add('clickable');
+      el.onclick = () => {
+        // insert each subtask as a sibling todo (kept simple; no deep tree UI)
+        subs.forEach(s => {
+          addItem({
+            title: s,
+            status: 'todo',
+            tag: parent.tag,
+            priority: parent.priority,
+            aiClassified: true,
+            parentId: parent.id
+          });
+        });
+        toast(`✅ 已生成 ${subs.length} 个子任务`);
+      };
+      clearTimeout(el._t);
+      el._t = setTimeout(() => {
+        el.classList.add('hidden');
+        el.classList.remove('clickable');
+        el.onclick = null;
+      }, 8000);
+    }, 1200); // 等主 toast 先显示一会
+  }
+
   /**
    * Show a classification toast with the AI verdict + an "改判" action that
    * moves the most-recently-added item to the opposite column. Falls back to
    * a plain toast if #toast-action infrastructure isn't present.
    */
-  function showClassifyToast(result, title, meta) {
+  function showClassifyToast(result, title, meta, newId) {
     const icon = result.type === 'idea' ? '💡' : '✅';
     const label = result.type === 'idea' ? 'Idea' : 'Todo';
     const tag = result.source === 'ai' ? '🤖' : '📐';
@@ -736,10 +1013,21 @@
         tag: $('#edit-tag').value,
         priority: $('#edit-priority').value,
         due: $('#edit-due').value,
-        repeat: $('#edit-repeat').value
+        repeat: $('#edit-repeat').value,
+        aiClassified: false   // 用户编辑过 → 移除 AI 角标
       });
       closeEdit();
       toast('✅ 已保存');
+    }
+    // 编辑面板里的 🤖 重判按钮
+    const editReclass = $('#edit-reclassify');
+    if (editReclass) {
+      editReclass.addEventListener('click', async () => {
+        if (!editingId) return;
+        const id = editingId;
+        closeEdit();
+        await reclassifyCard(id);
+      });
     }
   }
 
@@ -933,6 +1221,9 @@
       $('#cfg-token').value = settings.token || '';
       $('#cfg-repo').value  = settings.repo  || 'Maekfei/todo-ideas';
       $('#cfg-autosync').checked = !!settings.autosync;
+      const aiEp = $('#cfg-ai-endpoint'); if (aiEp) aiEp.value = settings.aiEndpoint || '';
+      const aiKey = $('#cfg-ai-key');     if (aiKey) aiKey.value = settings.aiKey || '';
+      const aiModel = $('#cfg-ai-model'); if (aiModel) aiModel.value = settings.aiModel || '';
       $('#cfg-status').textContent = settings.token ? '✅ 已配置' : '尚未配置';
       $('#settings-modal').classList.remove('hidden');
     });
@@ -940,9 +1231,12 @@
       settings.token = $('#cfg-token').value.trim();
       settings.repo  = $('#cfg-repo').value.trim();
       settings.autosync = $('#cfg-autosync').checked;
+      const aiEp = $('#cfg-ai-endpoint'); if (aiEp) settings.aiEndpoint = aiEp.value.trim() || 'https://yunwu.ai/v1/chat/completions';
+      const aiKey = $('#cfg-ai-key');     if (aiKey) settings.aiKey = aiKey.value.trim();
+      const aiModel = $('#cfg-ai-model'); if (aiModel) settings.aiModel = aiModel.value.trim() || 'deepseek-chat';
       saveSettings();
       $('#cfg-status').textContent = '✅ 已保存';
-      toast('设置已保存');
+      toast('设置已保存' + (settings.aiKey ? ' · 🤖 AI 已启用' : ''));
       if (settings.autosync) scheduleAutosync();
     });
     $('#cfg-pull').addEventListener('click', () => pullFromCloud());
@@ -1019,22 +1313,80 @@
   }
 
   // ============ KEYBOARD SHORTCUTS ============
+  /** 在指定方向上选择下一张卡片。dir: +1 (下/J) or -1 (上/K). */
+  function moveSelection(dir) {
+    const cards = $$('.col-body .card');
+    if (cards.length === 0) return;
+    let idx = cards.findIndex(c => c.dataset.id === selectedCardId);
+    if (idx < 0) idx = dir > 0 ? -1 : cards.length;
+    let next = idx + dir;
+    if (next < 0) next = cards.length - 1;
+    if (next >= cards.length) next = 0;
+    selectedCardId = cards[next].dataset.id;
+    $$('.card.selected').forEach(c => c.classList.remove('selected'));
+    cards[next].classList.add('selected');
+    cards[next].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  /** 把焦点选中跳到指定列首张卡片。 */
+  function focusColumn(status) {
+    const col = document.querySelector(`.col-body[data-drop="${status}"]`);
+    if (!col) return;
+    const first = col.querySelector('.card');
+    if (first) {
+      selectedCardId = first.dataset.id;
+      $$('.card.selected').forEach(c => c.classList.remove('selected'));
+      first.classList.add('selected');
+      first.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+
   function setupShortcuts() {
     document.addEventListener('keydown', e => {
-      // Esc closes modals
+      // Esc closes modals + clears selection
       if (e.key === 'Escape') {
         $$('.modal').forEach(m => m.classList.add('hidden'));
+        if (selectedCardId) {
+          selectedCardId = null;
+          $$('.card.selected').forEach(c => c.classList.remove('selected'));
+        }
         return;
       }
       // Cmd/Ctrl+Z undo
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-        const target = e.target;
-        if (target.matches('input, textarea, select')) return;
+        if (e.target.matches('input, textarea, select')) return;
         e.preventDefault(); undoLast(); return;
       }
       // Don't trigger single-letter shortcuts in inputs
       if (e.target.matches('input, textarea, select')) return;
 
+      const sel = selectedCardId ? items.find(x => x.id === selectedCardId && !x.deleted) : null;
+
+      // ---- Card navigation (works without selection too) ----
+      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); moveSelection(+1); return; }
+      if (e.key === 'k' || e.key === 'ArrowUp')   { e.preventDefault(); moveSelection(-1); return; }
+
+      // ---- Card actions (require selection) ----
+      if (sel) {
+        // Status: 1/2/3 → idea/todo/done
+        if (e.key === '1') { e.preventDefault(); updateItem(sel.id, { status: 'idea' }); return; }
+        if (e.key === '2') { e.preventDefault(); updateItem(sel.id, { status: 'todo' }); return; }
+        if (e.key === '3') { e.preventDefault(); updateItem(sel.id, { status: 'done' }); return; }
+        // Priority: ! @ # → high / mid / low
+        if (e.key === '!') { e.preventDefault(); updateItem(sel.id, { priority: 'high' }); toast('🔴 高优'); return; }
+        if (e.key === '@') { e.preventDefault(); updateItem(sel.id, { priority: 'mid'  }); toast('🟡 中优'); return; }
+        if (e.key === '#') { e.preventDefault(); updateItem(sel.id, { priority: 'low'  }); toast('🟢 低优'); return; }
+        // T → set due to today
+        if (e.key === 't') { e.preventDefault(); updateItem(sel.id, { due: todayStr() }); toast('📅 今天到期'); return; }
+        // E / Enter → edit
+        if (e.key === 'e' || e.key === 'Enter') { e.preventDefault(); openEdit(sel.id); return; }
+        // D / Backspace → delete
+        if (e.key === 'd' || e.key === 'Backspace') { e.preventDefault(); deleteItem(sel.id); selectedCardId = null; return; }
+        // R → reclassify with AI
+        if (e.key === 'r') { e.preventDefault(); reclassifyCard(sel.id); return; }
+      }
+
+      // ---- Global shortcuts (with modifier or special chars) ----
       switch (e.key) {
         case 'n': case 'N':
           e.preventDefault(); $('#quick-input').focus(); break;
@@ -1042,11 +1394,22 @@
           e.preventDefault(); $('#search').focus(); break;
         case '?':
           e.preventDefault(); $('#help-modal').classList.remove('hidden'); break;
-        case 't': case 'T':
-          toggleTheme(); break;
-        case 's': case 'S':
-          if (settings.token) { pullFromCloud().then(() => pushToCloud()); }
+        case 'T':  // Shift+T → 主题切换（避免和单 T 设今天冲突）
+          if (e.shiftKey) { toggleTheme(); }
           break;
+        case 'S':  // Shift+S → 同步
+          if (e.shiftKey && settings.token) { pullFromCloud().then(() => pushToCloud()); }
+          break;
+      }
+    });
+
+    // 点击空白处取消选中
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.card') && !e.target.closest('.today-bucket') && !e.target.closest('button')) {
+        if (selectedCardId) {
+          selectedCardId = null;
+          $$('.card.selected').forEach(c => c.classList.remove('selected'));
+        }
       }
     });
   }
@@ -1091,6 +1454,11 @@
     setupDoneCol();
     setupShortcuts();
     $('#stats-btn').addEventListener('click', openStats);
+
+    // 🪄 全部重判按钮
+    const reclassBtn = $('#reclassify-all-btn');
+    if (reclassBtn) reclassBtn.addEventListener('click', reclassifyAll);
+
     render();
 
     // Auto-pull on startup if configured

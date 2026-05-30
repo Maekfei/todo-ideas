@@ -676,3 +676,188 @@ button.danger:hover { background: rgba(239,68,68,.08); }
   .board { grid-template-columns: 1fr; }
   .card { break-inside: avoid; box-shadow: none; }
 }
+
+/* ============================================================
+   v4 SUPERAI: Today Hero buckets, time grouping, keyboard flow,
+              AI badge, quickfilter chips
+   ============================================================ */
+
+/* ---- Today Hero (3 buckets) ---- */
+.today-hero {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  flex: 1;
+  max-width: 720px;
+}
+.today-bucket {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: transform .15s, box-shadow .15s, border-color .15s;
+  box-shadow: var(--shadow-sm);
+}
+.today-bucket:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.05);
+  border-color: var(--accent);
+}
+.today-bucket.active {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--bg-elev) 0%, color-mix(in srgb, var(--accent) 8%, var(--bg-elev)) 100%);
+}
+.today-bucket-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.today-bucket-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+.today-bucket-label {
+  font-size: 12px;
+  color: var(--text-soft);
+  font-weight: 500;
+}
+.today-bucket-label .icon { margin-right: 3px; }
+.today-bucket.empty .today-bucket-num { color: var(--text-soft); opacity: .4; }
+.today-bucket.bucket-overdue.has-items { border-color: #fca5a5; }
+.today-bucket.bucket-overdue .today-bucket-num { color: #dc2626; }
+[data-theme="dark"] .today-bucket.bucket-overdue.has-items { border-color: #7f1d1d; }
+[data-theme="dark"] .today-bucket.bucket-overdue .today-bucket-num { color: #fca5a5; }
+.today-bucket-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.today-bucket-list li {
+  font-size: 12px;
+  color: var(--text-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 0;
+}
+.today-bucket-list li::before { content: '· '; color: var(--text-muted, #aaa); }
+.today-hero-empty {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-soft);
+  font-size: 14px;
+  background: var(--bg-elev);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+/* ---- Quick filter chips (filter-quick group) ---- */
+#filter-quick { margin-left: auto; }
+#filter-quick .chip { background: var(--bg-elev); }
+#filter-quick .chip.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* ---- Card time-group headers (in Todos col) ---- */
+.card-group { margin-bottom: 4px; }
+.card-group-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 4px 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-group-header .group-count {
+  font-weight: 400;
+  color: var(--text-muted, #999);
+  font-size: 10px;
+}
+.card-group.group-overdue .card-group-header { color: #dc2626; }
+[data-theme="dark"] .card-group.group-overdue .card-group-header { color: #fca5a5; }
+
+/* ---- Selected card (keyboard flow) ---- */
+.card.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent), var(--shadow-sm);
+}
+.card.selected .card-actions { opacity: 1; }
+
+/* ---- AI badge on cards ---- */
+.card.ai-classified { position: relative; }
+.card-ai-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg-elev));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+}
+
+/* ---- Quick add hint line ---- */
+.quick-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+.quick-hint kbd {
+  font-family: ui-monospace, monospace;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+/* ---- Edit modal: subtasks list ---- */
+#edit-subtasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg-soft);
+}
+.subtask-row input[type="checkbox"] { margin: 0; }
+
+/* ---- Reclassify-all spinner state ---- */
+#reclassify-all-btn.spin {
+  animation: spin 1.5s linear infinite;
+  pointer-events: none;
+}
+@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+/* ---- Mobile responsive: hero stacks ---- */
+@media (max-width: 900px) {
+  .today-hero {
+    grid-template-columns: 1fr;
+    max-width: none;
+    gap: 8px;
+  }
+  .today-bucket-list { display: none; }
+  #filter-quick { width: 100%; margin-left: 0; }
+}
